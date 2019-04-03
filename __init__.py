@@ -1,0 +1,1 @@
+# fwf2csv - Conversor de arquivo de tamanho fixo (fixed width file) para csv

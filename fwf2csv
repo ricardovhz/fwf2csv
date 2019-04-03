@@ -1,0 +1,253 @@
+#!/usr/bin/python
+
+# Converte um arquivo de tamanho fixo para CSV, com base em um layout
+# Syntaxe: read_fwf <layout> [<arquivo>]
+#
+# O resultado do csv e impresso no stdout 
+#
+# O layout pode seguir o seguinte formato:
+#
+# nome,tipo,inicio,tamanho
+#
+# onde "tipo" pode ser um dos seguintes:
+#    alfa - formato texto padrao
+#    num - numerico, sem decimais
+#    dec[:decimais] - decimal, sera divido por 10.0^decimais (padrao 2 decimais)
+#    date[:formato] - formato de data (yyyy/MM/dd ou dd/MM/yyyy) (padrao dd/MM/yyyy)
+
+import sys
+import csv
+import io
+from signal import signal, SIGPIPE, SIG_DFL
+
+signal(SIGPIPE, SIG_DFL) 
+
+program_name = 'fwf2csv'
+global_date_pattern = 'dd/MM/yyyy'
+
+class Layout:
+	def __init__(self, input, *kargs, **kvargs):
+		self.reader = csv.DictReader(input, fieldnames=['name','type','start','width'], delimiter=',')
+		self.record_id = kvargs['record_id']
+		self.record_position = None
+		if 'record_position' in kvargs:
+			self.record_position = kvargs['record_position']
+		self.fields = []
+		self._read_csv()
+	
+	def _get_converter(self, type):
+		if type == 'alfa':
+			return lambda x: str(x)
+		elif type == 'num':
+			return lambda x: int(x)
+		elif type.startswith('dec'):
+			fator = 2
+			if type.find(':') > -1:
+				fator = int(type.split(':')[1])
+			return lambda v: float(v) / pow(10.0, fator)
+		elif type.startswith('date'):
+			pattern = global_date_pattern
+			if type.find(':') > -1:
+				pattern = type.split(':')[1]
+	
+			if pattern == 'dd/MM/yyyy':
+			    return lambda v: '' if len(v) == 0 else v[0:2]+'/'+v[2:4]+'/'+v[4:]
+			elif pattern == 'yyyy/MM/dd':
+				return lambda v: '' if len(v) == 0 else v[6:]+'/'+v[4:6]+'/'+v[0:4]
+			elif pattern == 'no':
+			    return lambda v: v
+			else:
+				raise Exception(u"Date nao previsto: "+str(pattern))
+
+	def is_line_for_this_layout(self, line):
+		if self.record_position is None:
+			return True
+		
+		try:
+			record = ""
+			for k in self.record_position:
+				record = record + line[k[0]-1:k[0]-1+k[1]]
+			return record == self.record_id
+		except Exception:
+			pass
+		return False
+
+	def _read_csv(self):
+		for row in self.reader:	
+			field = {}
+			field['name'] = row['name']
+			field['converter'] = self._get_converter(row['type'])
+			field['start'] = int(row['start'])
+			field['width'] = int(row['width'])
+			self.fields.append(field)
+
+	def iterrows(self):
+		for i in range(len(self.fields)):
+			yield (i, self.fields[i])
+
+class Reader:
+	def __init__(self, file_in, layout, *kargs, **kvargs):
+		if type(file_in) == str:
+			self.file_in = open(file_in, "r")
+		else:
+			self.file_in = file_in
+
+		self.layouts = {}
+		self.record_position = None if 'record_position' not in kvargs else kvargs['record_position']
+
+		if type(layout) == dict:
+			for k in layout:
+				self.layouts[k] = self._process_layout(layout[k])
+		else:
+			self.layouts['0'] = self._process_layout(layout)
+
+	def _process_layout(self, layout):
+		result = {}
+		result['layout'] = layout
+		result['names'] = [f['name'] for index, f in layout.iterrows()]
+		result['colspecs'] = [(f['start']-1, f['start']-1+f['width']) for index, f in layout.iterrows()]
+		result['converters'] = {f['name']:f['converter'] for index, f in layout.iterrows()}
+		return result;
+
+	def __enter__(self):
+		return self
+
+	def __exit__(self, *kargs):
+		self.file_in.close()
+
+	def _process_line(self, layout, line, writer):
+		result = dict()
+		for i in range(len(layout['names'])):
+			field_name = layout['names'][i]
+			start, end = layout['colspecs'][i]
+			converter = layout['converters'][field_name]
+
+			value = line[start:end].strip()
+
+			if converter is not None:
+				value = converter(value)
+
+			result[field_name] = value
+		writer.writerow(result)
+
+	def _read_file(self):
+		for l in self.file_in:
+			yield l
+
+	def to_csv(self, out_file, *kargs, **kvargs):
+		writers = {}
+		current_writer = None
+
+		only_records = None
+		if 'only_records' in kvargs and kvargs['only_records'] is not None:
+			only_records = [x for x in kvargs['only_records'].split(',')]
+
+		ignore_invalid = False
+		if 'ignore_invalid' in kvargs and kvargs['ignore_invalid'] is not None:
+			ignore_invalid = kvargs['ignore_invalid']
+
+		for line in self._read_file():
+			layout = None
+			for k in self.layouts:
+				if self.layouts[k]['layout'].is_line_for_this_layout(line):
+					layout = self.layouts[k]
+
+			if layout is None:
+				if not ignore_invalid:
+					raise Exception("Tipo de registro nao reconhecido: {}".format(line))
+			elif only_records is None or layout['layout'].record_id in only_records:
+				record = layout['layout'].record_id
+
+				if record not in writers:
+					writer = csv.DictWriter(out_file, delimiter=',', quoting=kvargs['quoting'], fieldnames=layout['names'])
+					writers[record] = writer
+
+				if record != current_writer:
+					if len(writers) > 1:
+						out_file.write('\n==============================================\n\n')
+					current_writer = record
+					writers[record].writeheader()
+
+				self._process_line(layout, line, writers[record])
+
+def print_usage():
+	print("Usage: {} [-o|--only-records <tipos-de-registros>] [-i|--ignore-invalid] <layout> [<arquivo>|stdin]".format(program_name))
+
+def read_layouts(layout_name):
+	global global_date_pattern
+	layout_content = u""
+
+	layouts = {}
+	record_position = None
+	record_id = '0'
+	with open(layout_name,"r") as l:
+		for line in l:
+			if len(line.strip()) == 0:
+				pass
+			if line.startswith("$record_position:"):
+				if len(layout_content.strip()) > 0:
+					layouts[record_id] = Layout(io.StringIO(layout_content), record_id=record_id, record_position=record_position)
+					layout_content = u""
+				records = line.strip().split(':')[1]
+				record_position = []
+				for f in records.split(';'):
+					r = f.split(',')
+					record_position.append((int(r[0]), int(r[1])))
+			elif line.startswith("$record_id:"):
+				if len(layout_content.strip()) > 0:
+					layouts[record_id] = Layout(io.StringIO(layout_content), record_id=record_id, record_position=record_position)
+					layout_content = u""
+
+				record_id = line.strip().split(':')[1]
+			elif line.startswith("$date_pattern"):
+				global_date_pattern = line.split(" ")[1].replace('\n','')
+			elif not line.startswith("#"):
+				layout_content += line
+
+	if len(line.strip()) > 0:
+		layouts[record_id] = Layout(io.StringIO(layout_content), record_id=record_id, 
+			record_position= None if record_position is None else record_position)
+	
+	return layouts
+
+def main():
+	layout_name = None
+	file_name = None
+	only_records = None
+
+	layout_flag = False
+	only_records_flag = False
+	ignore_invalid_flag = False
+
+	for opt in sys.argv[1:]:
+		if opt == '-o' or opt == '--only-records':
+			only_records_flag = True
+		elif opt == '-i' or opt == '--ignore-invalid':
+			ignore_invalid_flag = True
+		elif only_records_flag:
+			only_records = opt
+			only_records_flag = False
+		elif layout_flag == False:
+			layout_name = opt
+			layout_flag = True
+		else:
+			file_name = opt
+
+	if len(sys.argv) < 2 or layout_name == None: 
+		print_usage()
+		quit()
+
+	if file_name == None:
+	    file_name = sys.stdin
+
+	layouts = read_layouts(layout_name)
+
+	with Reader(file_name, layouts) as reader:
+		reader.to_csv(sys.stdout, decimal=',', date_format='dd/MM/yyyy', quoting=csv.QUOTE_NONNUMERIC, only_records=only_records, ignore_invalid=ignore_invalid_flag)
+
+if __name__ == "__main__":
+	try:
+		main()
+	except Exception as e:
+		print(e)
+		quit(1)
