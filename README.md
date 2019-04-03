@@ -124,7 +124,7 @@ registros,num,2,5
 ```
 
 ```
-fwf2csv reg_var_layout.txt reg_var_data.txt 
+fwf2csv layout.csv dados.txt 
 ```
 
 ```
@@ -148,10 +148,45 @@ fwf2csv reg_var_layout.txt reg_var_data.txt
 ```
 
 ```
-fwf2csv -o 1A reg_var_layout.txt reg_var_data.txt 
+fwf2csv -o 1A layout.csv dados.txt 
 ```
 
 ```
 "nome","idade"
 "RICARDO",30
+```
+
+## Usando com o comando q (text-as-data)
+
+Arquivo **dados.txt**
+```
+0HEADER
+1ARICARDO   30
+1BRUA TESTE 125  JARDIM TESTE        
+1AJOSE      52
+1BRUA TESTE 125  JARDIM TESTE        
+1AMARIA     44
+1BRUA TESTE 125  JARDIM TESTE        
+900001
+```
+
+Arquivo **layout.csv** é o mesmo do exemplo anterior 
+
+```bash
+fwf2csv -o 1A layout.csv dados.txt 
+```
+
+```
+"nome","idade"
+"RICARDO",30
+"JOSE",52
+"MARIA",44
+```
+
+Pode-se usar o comando [q](http://harelba.github.io/q/) para tornar possível a execução de queries SQL nos arquivos.
+Por exemplo, para encontrar a média de idades da saída anterior:
+
+```bash
+fwf2csv -o 1A layout.csv dados.txt | q -H -d',' "select avg(idade) from -"
+42.0
 ```
