@@ -26,10 +26,11 @@ nome,tipo,inicio,tamanho
 ```
 
 onde "tipo" pode ser um dos seguintes:
-    - `alfa` - formato texto padrao
-    - `num` - numerico, sem decimais
-    - `dec[:decimais]` - decimal, sera divido por 10.0^decimais (padrao 2 decimais)
-    - `date[:formato]` - formato de data (yyyy/MM/dd ou dd/MM/yyyy). Padrao **dd/MM/yyyy**
+
+ - `alfa` - formato texto padrao
+ - `num` - numerico, sem decimais
+ - `dec[:decimais]` - decimal, sera divido por 10.0^decimais (padrao 2 decimais)
+ - `date[:formato]` - formato de data (yyyy/MM/dd ou dd/MM/yyyy). Padrao **dd/MM/yyyy**
 
 Pode-se definir tipos de registros, por exemplo:
 
