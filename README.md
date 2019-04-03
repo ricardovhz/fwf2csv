@@ -1,8 +1,12 @@
 # fwf2csv
 
-Converte um arquivo de tamanho fixo para CSV, com base em um layout definido
+Converte um arquivo de tamanho fixo para CSV, com base em um layout definido.
 
-Syntaxe: 
+## Instalação
+
+Baixar a release [aqui](https://github.com/ricardovhz/fwf2csv/releases/download/0.0.1/fwf2csv) e copiar para um diretório do `PATH` (Ex.: `/usr/local/bin`)
+
+## Executando
 
 ```bash
 fwf2csv [-o|--only-records <registros>] [-i|--ignore-invalid] <layout> [<arquivo>]
